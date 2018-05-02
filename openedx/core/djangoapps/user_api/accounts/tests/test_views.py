@@ -40,6 +40,7 @@ from entitlements.models import CourseEntitlementSupportDetail
 from entitlements.tests.factories import CourseEntitlementFactory
 from lms.djangoapps.verify_student.tests.factories import SoftwareSecurePhotoVerificationFactory
 from openedx.core.djangoapps.course_groups.models import CourseUserGroup, UnregisteredLearnerCohortAssignments
+from openedx.core.djangoapps.credit.tests.factories import CreditRequirementStatusFactory
 from openedx.core.djangoapps.site_configuration.tests.factories import SiteFactory
 from openedx.core.djangoapps.user_api.accounts import ACCOUNT_VISIBILITY_PREF_KEY
 from openedx.core.djangoapps.user_api.accounts.signals import USER_RETIRE_MAILINGS
@@ -65,6 +66,7 @@ from student.tests.factories import (
     SuperuserFactory,
     UserFactory
 )
+from survey.tests.factories import SurveyAnswerFactory
 
 from .. import ALL_USERS_VISIBILITY, PRIVATE_VISIBILITY
 from ..views import AccountRetirementView, USER_PROFILE_PII
@@ -1094,6 +1096,7 @@ class TestDeactivateLogout(RetirementTestCase):
         super(TestDeactivateLogout, self).setUp()
         self.test_password = 'password'
         self.test_user = UserFactory(password=self.test_password)
+        self.original_email = self.test_user.email
         UserSocialAuth.objects.create(
             user=self.test_user,
             provider='some_provider_name',
@@ -1105,7 +1108,20 @@ class TestDeactivateLogout(RetirementTestCase):
             uid='xyz@gmail.com'
         )
 
+        CourseEnrollmentAllowedFactory.create(email=self.original_email)
         Registration().register(self.test_user)
+
+        self.course_key = CourseKey.from_string('course-v1:edX+DemoX+Demo_Course')
+        self.cohort = CourseUserGroup.objects.create(
+            name="TestCohort",
+            course_id=self.course_key,
+            group_type=CourseUserGroup.COHORT
+        )
+        self.cohort_assignment = UnregisteredLearnerCohortAssignments.objects.create(
+            course_user_group=self.cohort,
+            course_id=self.course_key,
+            email=self.original_email
+        )
 
         self.url = reverse('deactivate_logout')
 
@@ -1127,6 +1143,8 @@ class TestDeactivateLogout(RetirementTestCase):
         self.assertEqual(get_retired_email_by_email(self.test_user.email), updated_user.email)
         self.assertFalse(updated_user.has_usable_password())
         self.assertEqual(list(UserSocialAuth.objects.filter(user=self.test_user)), [])
+        self.assertFalse(CourseEnrollmentAllowed.objects.filter(email=self.original_email).exists())
+        self.assertFalse(UnregisteredLearnerCohortAssignments.objects.filter(email=self.original_email).exists())
         self.assertEqual(list(Registration.objects.filter(user=self.test_user)), [])
         self.assertEqual(len(UserRetirementStatus.objects.filter(user_id=self.test_user.id)), 1)
         # these retirement utils are tested elsewhere; just make sure we called them
@@ -1698,6 +1716,12 @@ class TestAccountRetirementPost(RetirementTestCase):
         PendingEmailChangeFactory.create(user=self.test_user)
         UserOrgTagFactory.create(user=self.test_user, key='foo', value='bar')
         UserOrgTagFactory.create(user=self.test_user, key='cat', value='dog')
+        self.credit_requirement_status = CreditRequirementStatusFactory.create(
+            username=self.original_username,
+            reason={'something': 'that might have PII in it'},
+        )
+        self.survey_answer = SurveyAnswerFactory.create(user=self.test_user, field_value='foo')
+
 
         CourseEnrollmentAllowedFactory.create(email=self.original_email)
 
@@ -1810,6 +1834,8 @@ class TestAccountRetirementPost(RetirementTestCase):
         self._photo_verification_assertions()
         self.assertFalse(PendingEmailChange.objects.filter(user=self.test_user).exists())
         self.assertFalse(UserOrgTag.objects.filter(user=self.test_user).exists())
+        self._credit_requirement_status_assertions()
+        self._survey_answer_assertions()
 
         self.assertFalse(CourseEnrollmentAllowed.objects.filter(email=self.original_email).exists())
         self.assertFalse(UnregisteredLearnerCohortAssignments.objects.filter(email=self.original_email).exists())
@@ -1918,3 +1944,18 @@ class TestAccountRetirementPost(RetirementTestCase):
         self.assertEqual(self.test_user, self.photo_verification.user)
         for field in ('name', 'face_image_url', 'photo_id_image_url', 'photo_id_key'):
             self.assertEqual('', getattr(self.photo_verification, field))
+
+    def _credit_requirement_status_assertions(self):
+        """
+        Helper method for asserting that ``CreditRequirementStatus`` objects are retired.
+        """
+        self.credit_requirement_status.refresh_from_db()
+        self.assertEqual({}, self.credit_requirement_status.reason)
+        self.assertEqual(self.retired_username, self.credit_requirement_status.username)
+
+    def _survey_answer_assertions(self):
+        """
+        Helper method for asserting that ``SurveyAnswer`` objects are retired.
+        """
+        self.survey_answer.refresh_from_db()
+        self.assertEqual('', self.survey_answer.field_value)
