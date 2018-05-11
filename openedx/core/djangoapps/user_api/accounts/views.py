@@ -17,6 +17,7 @@ from django.db import transaction
 from django.utils.translation import ugettext as _
 from edx_rest_framework_extensions.authentication import JwtAuthentication
 from enterprise.models import EnterpriseCourseEnrollment, EnterpriseCustomerUser, PendingEnterpriseCustomerUser
+from integrated_channels.degreed.models import DegreedLearnerDataTransmissionAudit
 from integrated_channels.sap_success_factors.models import SapSuccessFactorsLearnerDataTransmissionAudit
 from rest_framework import permissions, status
 from rest_framework.authentication import SessionAuthentication
@@ -29,13 +30,12 @@ from social_django.models import UserSocialAuth
 
 from entitlements.models import CourseEntitlement
 from lms.djangoapps.survey.models import SurveyAnswer
-from openedx.core.djangoapps.credit.models import CreditRequirementStatus
+from openedx.core.djangoapps.credit.models import CreditRequirementStatus, CreditRequest
 from lms.djangoapps.verify_student.models import SoftwareSecurePhotoVerification
 from openedx.core.djangoapps.course_groups.models import UnregisteredLearnerCohortAssignments
 from openedx.core.djangoapps.profile_images.images import remove_profile_images
 from openedx.core.djangoapps.user_api.accounts.image_helpers import get_profile_image_names, set_has_profile_image
 from openedx.core.djangoapps.user_api.preferences.api import update_email_opt_in
-from openedx.core.djangolib.oauth2_retirement_utils import retire_dop_oauth2_models, retire_dot_oauth2_models
 from openedx.core.lib.api.authentication import (
     OAuth2AuthenticationAllowInactiveUser,
     SessionAuthenticationAllowInactiveUser
@@ -642,22 +642,16 @@ class LMSAccountRetirementView(ViewSet):
                 ManualEnrollmentAudit.retire_manual_enrollments(enrollment)
 
             # EDUCATOR-2659 // EDUCATOR-2813
-            # Backlog
+            # this is currently handled below, the same way as sapsf
 
             # EDUCATOR-2658
-            # Backlog
+            CreditRequest.retire_
 
             # EDUCATOR-2648
             # Backlog
 
             # EDUCATOR-2681
             # Backlog
-
-            # EDUCATOR-2703
-            # In progress
-            # https://github.com/edx/edx-platform/pull/18012/files
-            retire_dop_oauth2_models(user)
-            retire_dot_oauth2_models(user)
 
             # EDUCATOR-2706
             # https://github.com/edx/edx-platform/pull/18037/files
@@ -717,6 +711,7 @@ class AccountRetirementView(ViewSet):
             # Retire data from Enterprise models
             self.retire_users_data_sharing_consent(username, retired_username)
             self.retire_sapsf_data_transmission(user)
+            self.retire_degreed_data_transmission(user)
             self.retire_user_from_pending_enterprise_customer_user(user, retired_email)
             self.retire_entitlement_support_detail(user)
 
@@ -783,6 +778,17 @@ class AccountRetirementView(ViewSet):
                     enterprise_course_enrollment_id=enrollment.id
                 )
                 audits.update(sapsf_user_id='')
+
+    @staticmethod
+    def retire_degreed_data_transmission(user):
+        for ent_user in EnterpriseCustomerUser.objects.filter(user_id=user.id):
+            for enrollment in EnterpriseCourseEnrollment.objects.filter(
+                enterprise_customer_user=ent_user
+            ):
+                audits = DegreedLearnerDataTransmissionAudit.objects.filter(
+                    enterprise_course_enrollment_id=enrollment.id
+                )
+                audits.update(degreed_user_email='')
 
     @staticmethod
     def retire_user_from_pending_enterprise_customer_user(user, retired_email):
