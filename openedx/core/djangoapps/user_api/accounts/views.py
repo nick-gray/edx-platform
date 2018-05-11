@@ -32,6 +32,7 @@ from entitlements.models import CourseEntitlement
 from lms.djangoapps.survey.models import SurveyAnswer
 from openedx.core.djangoapps.credit.models import CreditRequirementStatus, CreditRequest
 from lms.djangoapps.verify_student.models import SoftwareSecurePhotoVerification
+from openedx.core.djangoapps.api_admin.models import ApiAccessRequest
 from openedx.core.djangoapps.course_groups.models import UnregisteredLearnerCohortAssignments
 from openedx.core.djangoapps.profile_images.images import remove_profile_images
 from openedx.core.djangoapps.user_api.accounts.image_helpers import get_profile_image_names, set_has_profile_image
@@ -612,32 +613,30 @@ class LMSAccountRetirementView(ViewSet):
             return Response(status=status.HTTP_404_NOT_FOUND)
 
         try:
-            # Is this still necessary?
-            user = UserRetirementStatus.get_retirement_for_retirement_action(username).user
-
+            retirement = UserRetirementStatus.get_retirement_for_retirement_action(username)
             # EDUCATOR-2702
             # Blocked
             # https://github.com/edx/django-wiki/pull/35/files
             # Not sure I'm calling functions in the wiki correctly
-            RevisionPluginRevision.retire_user(user)
+            RevisionPluginRevision.retire_user(retirement.user)
 
             # EDUCATOR-2701
             # Blocked
             # https://github.com/edx/django-wiki/pull/34/files
             # Not sure I'm calling functions in the wiki correctly
-            ArticleRevision.retire_user(user)
+            ArticleRevision.retire_user(retirement.user)
 
             # EDUCATOR-2695
             # https://github.com/edx/edx-platform/pull/18100/files
-            PendingNameChange.delete_by_user_value(user, field='user')
+            PendingNameChange.delete_by_user_value(retirement.user, field='user')
 
             # EDUCATOR-2690
             # https://github.com/edx/edx-platform/commit/41b1f03c78d2c9ad7975f3b7eb28c2ca20884122
-            PasswordHistory.retire_user(user.id)
+            PasswordHistory.retire_user(retirement.user.id)
 
             # EDUCATOR-2689
             # https://github.com/edx/edx-platform/pull/18111/files
-            course_enrollments = CourseEnrollment.objects.filter(user=user)
+            course_enrollments = CourseEnrollment.objects.filter(user=retirement.user)
             for enrollment in course_enrollments:
                 ManualEnrollmentAudit.retire_manual_enrollments(enrollment)
 
@@ -645,21 +644,21 @@ class LMSAccountRetirementView(ViewSet):
             # this is currently handled below, the same way as sapsf
 
             # EDUCATOR-2658
-            CreditRequest.retire_
+            CreditRequest.retire_user(retirement.original_username, retirement.retired_username)
 
             # EDUCATOR-2648
-            # Backlog
+            ApiAccessRequest.retire_user(retirement.user)
 
             # EDUCATOR-2681
-            # Backlog
+            # No action required; this was done entirely in the enterprise repo and the table is dropped
 
             # EDUCATOR-2706
             # https://github.com/edx/edx-platform/pull/18037/files
-            CreditRequirementStatus.retire_user(user.username)
+            CreditRequirementStatus.retire_user(retirement.user.username)
 
             # EDUCATOR-2698
             # https://github.com/edx/edx-platform/pull/18091/files
-            SurveyAnswer.retire_user(user.id)
+            SurveyAnswer.retire_user(retirement.user.id)
 
         except UserRetirementStatus.DoesNotExist:
             return Response(status=status.HTTP_404_NOT_FOUND)
