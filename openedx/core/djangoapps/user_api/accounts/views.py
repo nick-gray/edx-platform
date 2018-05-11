@@ -29,7 +29,6 @@ from six import text_type
 from social_django.models import UserSocialAuth
 
 from entitlements.models import CourseEntitlement
-from lms.djangoapps.survey.models import SurveyAnswer
 from lms.djangoapps.verify_student.models import SoftwareSecurePhotoVerification
 from openedx.core.djangoapps.api_admin.models import ApiAccessRequest
 from openedx.core.djangoapps.credit.models import CreditRequirementStatus, CreditRequest
@@ -43,6 +42,7 @@ from openedx.core.lib.api.authentication import (
     SessionAuthenticationAllowInactiveUser
 )
 from openedx.core.lib.api.parsers import MergePatchParser
+from survey.models import SurveyAnswer
 from student.models import (
     CourseEnrollment,
     ManualEnrollmentAudit,
