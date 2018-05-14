@@ -25,9 +25,9 @@ class DiscussionConfig(AppConfig):
             },
         },
         PluginSettings.CONFIG: {
-            ProjectType.CMS: {
-                SettingsType.COMMON: {PluginSettings.RELATIVE_PATH: u'settings.common'},
-            },
+#            ProjectType.CMS: {
+#                SettingsType.COMMON: {PluginSettings.RELATIVE_PATH: u'settings.common'},
+#            },
             ProjectType.LMS: {
                 SettingsType.COMMON: {PluginSettings.RELATIVE_PATH: u'settings.common'},
             },
