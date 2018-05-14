@@ -40,7 +40,6 @@ from entitlements.models import CourseEntitlementSupportDetail
 from entitlements.tests.factories import CourseEntitlementFactory
 from lms.djangoapps.verify_student.tests.factories import SoftwareSecurePhotoVerificationFactory
 from openedx.core.djangoapps.course_groups.models import CourseUserGroup, UnregisteredLearnerCohortAssignments
-from openedx.core.djangoapps.credit.tests.factories import CreditRequirementStatusFactory
 from openedx.core.djangoapps.site_configuration.tests.factories import SiteFactory
 from openedx.core.djangoapps.user_api.accounts import ACCOUNT_VISIBILITY_PREF_KEY
 from openedx.core.djangoapps.user_api.accounts.signals import USER_RETIRE_MAILINGS
@@ -66,7 +65,6 @@ from student.tests.factories import (
     SuperuserFactory,
     UserFactory
 )
-from survey.tests.factories import SurveyAnswerFactory
 
 from .. import ALL_USERS_VISIBILITY, PRIVATE_VISIBILITY
 from ..views import AccountRetirementView, USER_PROFILE_PII
@@ -1096,7 +1094,6 @@ class TestDeactivateLogout(RetirementTestCase):
         super(TestDeactivateLogout, self).setUp()
         self.test_password = 'password'
         self.test_user = UserFactory(password=self.test_password)
-        self.original_email = self.test_user.email
         UserSocialAuth.objects.create(
             user=self.test_user,
             provider='some_provider_name',
@@ -1108,20 +1105,7 @@ class TestDeactivateLogout(RetirementTestCase):
             uid='xyz@gmail.com'
         )
 
-        CourseEnrollmentAllowedFactory.create(email=self.original_email)
         Registration().register(self.test_user)
-
-        self.course_key = CourseKey.from_string('course-v1:edX+DemoX+Demo_Course')
-        self.cohort = CourseUserGroup.objects.create(
-            name="TestCohort",
-            course_id=self.course_key,
-            group_type=CourseUserGroup.COHORT
-        )
-        self.cohort_assignment = UnregisteredLearnerCohortAssignments.objects.create(
-            course_user_group=self.cohort,
-            course_id=self.course_key,
-            email=self.original_email
-        )
 
         self.url = reverse('deactivate_logout')
 
@@ -1714,12 +1698,6 @@ class TestAccountRetirementPost(RetirementTestCase):
         PendingEmailChangeFactory.create(user=self.test_user)
         UserOrgTagFactory.create(user=self.test_user, key='foo', value='bar')
         UserOrgTagFactory.create(user=self.test_user, key='cat', value='dog')
-        self.credit_requirement_status = CreditRequirementStatusFactory.create(
-            username=self.original_username,
-            reason={'something': 'that might have PII in it'},
-        )
-        self.survey_answer = SurveyAnswerFactory.create(user=self.test_user, field_value='foo')
-
 
         CourseEnrollmentAllowedFactory.create(email=self.original_email)
 
@@ -1832,8 +1810,6 @@ class TestAccountRetirementPost(RetirementTestCase):
         self._photo_verification_assertions()
         self.assertFalse(PendingEmailChange.objects.filter(user=self.test_user).exists())
         self.assertFalse(UserOrgTag.objects.filter(user=self.test_user).exists())
-        # self._credit_requirement_status_assertions()
-        # self._survey_answer_assertions()
 
         self.assertFalse(CourseEnrollmentAllowed.objects.filter(email=self.original_email).exists())
         self.assertFalse(UnregisteredLearnerCohortAssignments.objects.filter(email=self.original_email).exists())
@@ -1942,170 +1918,3 @@ class TestAccountRetirementPost(RetirementTestCase):
         self.assertEqual(self.test_user, self.photo_verification.user)
         for field in ('name', 'face_image_url', 'photo_id_image_url', 'photo_id_key'):
             self.assertEqual('', getattr(self.photo_verification, field))
-
-    def _credit_requirement_status_assertions(self):
-        """
-        Helper method for asserting that ``CreditRequirementStatus`` objects are retired.
-        """
-        self.credit_requirement_status.refresh_from_db()
-        self.assertEqual({}, self.credit_requirement_status.reason)
-        self.assertEqual(self.retired_username, self.credit_requirement_status.username)
-
-    def _survey_answer_assertions(self):
-        """
-        Helper method for asserting that ``SurveyAnswer`` objects are retired.
-        """
-        self.survey_answer.refresh_from_db()
-        self.assertEqual('', self.survey_answer.field_value)
-
-
-@unittest.skipUnless(settings.ROOT_URLCONF == 'lms.urls', 'Account APIs are only supported in LMS')
-class TestLMSAccountRetirementPost(RetirementTestCase):
-    """
-    Tests the LMS account retirement (P2) endpoint.
-    """
-    def setUp(self):
-        super(TestLMSAccountRetirementPost, self).setUp()
-
-        self.test_user = UserFactory()
-        self.test_superuser = SuperuserFactory()
-        self.original_username = self.test_user.username
-        self.original_email = self.test_user.email
-        self.retired_username = get_retired_username_by_username(self.original_username)
-        self.retired_email = get_retired_email_by_email(self.original_email)
-
-        retirement_state = RetirementState.objects.get(state_name='RETIRING_LMS')
-        self.retirement_status = UserRetirementStatus.create_retirement(self.test_user)
-        self.retirement_status.current_state = retirement_state
-        self.retirement_status.last_state = retirement_state
-        self.retirement_status.save()
-
-        retirement = UserRetirementStatus.get_retirement_for_retirement_action(username)
-        # create data for testing
-        RevisionPluginRevision.retire_user(retirement.user)
-        ArticleRevision.retire_user(retirement.user)
-        PendingNameChange.delete_by_user_value(retirement.user, field='user')
-        PasswordHistory.retire_user(retirement.user.id)
-        course_enrollments = CourseEnrollment.objects.filter(user=retirement.user)
-        for enrollment in course_enrollments:
-            ManualEnrollmentAudit.retire_manual_enrollments(enrollment)
-        CreditRequest.retire_user(retirement.original_username, retirement.retired_username)
-        ApiAccessRequest.retire_user(retirement.user)
-        CreditRequirementStatus.retire_user(retirement.user.username)
-        SurveyAnswer.retire_user(retirement.user.id)
-
-        # setup for doing POST from test client
-        self.headers = self.build_jwt_headers(self.test_superuser)
-        self.headers['content_type'] = "application/json"
-        self.url = reverse('accounts_retire_LMS')
-
-    def post_and_assert_status(self, data, expected_status=status.HTTP_204_NO_CONTENT):
-        """
-        Helper function for making a request to the retire subscriptions endpoint, and asserting the status.
-        """
-        response = self.client.post(self.url, json.dumps(data), **self.headers)
-        self.assertEqual(response.status_code, expected_status)
-        return response
-
-    def test_retire_user(self):
-        data = {'username': self.original_username}
-        self.post_and_assert_status(data)
-
-        self.test_user.refresh_from_db()
-        self.test_user.profile.refresh_from_db()  # pylint: disable=no-member
-
-        retirement = UserRetirementStatus.get_retirement_for_retirement_action(username)
-        # EDUCATOR-2702
-        # Blocked
-        # https://github.com/edx/django-wiki/pull/35/files
-        # Not sure I'm calling functions in the wiki correctly
-        RevisionPluginRevision.retire_user(retirement.user)
-
-        # EDUCATOR-2701
-        # Blocked
-        # https://github.com/edx/django-wiki/pull/34/files
-        # Not sure I'm calling functions in the wiki correctly
-        ArticleRevision.retire_user(retirement.user)
-
-        # EDUCATOR-2695
-        # https://github.com/edx/edx-platform/pull/18100/files
-        PendingNameChange.delete_by_user_value(retirement.user, field='user')
-
-        # EDUCATOR-2690
-        # https://github.com/edx/edx-platform/commit/41b1f03c78d2c9ad7975f3b7eb28c2ca20884122
-        PasswordHistory.retire_user(retirement.user.id)
-
-        # EDUCATOR-2689
-        # https://github.com/edx/edx-platform/pull/18111/files
-        course_enrollments = CourseEnrollment.objects.filter(user=retirement.user)
-        for enrollment in course_enrollments:
-            ManualEnrollmentAudit.retire_manual_enrollments(enrollment)
-
-        # EDUCATOR-2659 // EDUCATOR-2813
-        # this is currently handled below, the same way as sapsf
-
-        # EDUCATOR-2658
-        CreditRequest.retire_user(retirement.original_username, retirement.retired_username)
-
-        # EDUCATOR-2648
-        ApiAccessRequest.retire_user(retirement.user)
-
-        # EDUCATOR-2681
-        # No action required; this was done entirely in the enterprise repo and the table is dropped
-
-        # EDUCATOR-2706
-        # https://github.com/edx/edx-platform/pull/18037/files
-        CreditRequirementStatus.retire_user(retirement.user.username)
-
-        # EDUCATOR-2698
-        # https://github.com/edx/edx-platform/pull/18091/files
-        SurveyAnswer.retire_user(retirement.user.id)
-
-    def test_deletes_pii_from_user_profile(self):
-        for model_field, value_to_assign in USER_PROFILE_PII.iteritems():
-            if value_to_assign == '':
-                value = 'foo'
-            else:
-                value = mock.Mock()
-            setattr(self.test_user.profile, model_field, value)
-
-        AccountRetirementView.clear_pii_from_userprofile(self.test_user)
-
-        for model_field, value_to_assign in USER_PROFILE_PII.iteritems():
-            self.assertEqual(value_to_assign, getattr(self.test_user.profile, model_field))
-
-        social_links = SocialLink.objects.filter(
-            user_profile=self.test_user.profile
-        )
-        self.assertFalse(social_links.exists())
-
-    def _entitlement_support_detail_assertions(self):
-        """
-        Helper method for asserting that ``CourseEntitleSupportDetail`` objects are retired.
-        """
-        self.entitlement_support_detail.refresh_from_db()
-        self.assertEqual('', self.entitlement_support_detail.comments)
-
-    def _photo_verification_assertions(self):
-        """
-        Helper method for asserting that ``SoftwareSecurePhotoVerification`` objects are retired.
-        """
-        self.photo_verification.refresh_from_db()
-        self.assertEqual(self.test_user, self.photo_verification.user)
-        for field in ('name', 'face_image_url', 'photo_id_image_url', 'photo_id_key'):
-            self.assertEqual('', getattr(self.photo_verification, field))
-
-    def _credit_requirement_status_assertions(self):
-        """
-        Helper method for asserting that ``CreditRequirementStatus`` objects are retired.
-        """
-        self.credit_requirement_status.refresh_from_db()
-        self.assertEqual({}, self.credit_requirement_status.reason)
-        self.assertEqual(self.retired_username, self.credit_requirement_status.username)
-
-    def _survey_answer_assertions(self):
-        """
-        Helper method for asserting that ``SurveyAnswer`` objects are retired.
-        """
-        self.survey_answer.refresh_from_db()
-        self.assertEqual('', self.survey_answer.field_value)
