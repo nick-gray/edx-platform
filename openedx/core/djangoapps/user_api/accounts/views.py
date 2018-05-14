@@ -10,7 +10,7 @@ from functools import wraps
 
 import pytz
 from consent.models import DataSharingConsent
-from wiki.models.article import ArticleRevision
+from wiki.models import ArticleRevision
 from wiki.models.pluginbase import RevisionPluginRevision
 from django.contrib.auth import authenticate, get_user_model, logout
 from django.core.cache import cache

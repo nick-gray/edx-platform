@@ -1099,6 +1099,10 @@ INSTALLED_APPS = [
     'lms.djangoapps.verify_student.apps.VerifyStudentConfig',
     'completion',
 
+    'wiki',  # The new django-wiki from benjaoming
+    'django_notify',
+    'course_wiki',
+
     # Microsite configuration application
     'microsite_configuration',
 
