@@ -1143,8 +1143,6 @@ class TestDeactivateLogout(RetirementTestCase):
         self.assertEqual(get_retired_email_by_email(self.test_user.email), updated_user.email)
         self.assertFalse(updated_user.has_usable_password())
         self.assertEqual(list(UserSocialAuth.objects.filter(user=self.test_user)), [])
-        self.assertFalse(CourseEnrollmentAllowed.objects.filter(email=self.original_email).exists())
-        self.assertFalse(UnregisteredLearnerCohortAssignments.objects.filter(email=self.original_email).exists())
         self.assertEqual(list(Registration.objects.filter(user=self.test_user)), [])
         self.assertEqual(len(UserRetirementStatus.objects.filter(user_id=self.test_user.id)), 1)
         # these retirement utils are tested elsewhere; just make sure we called them
