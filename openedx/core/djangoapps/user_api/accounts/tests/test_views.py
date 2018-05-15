@@ -1950,36 +1950,22 @@ class TestLMSAccountRetirementPost(RetirementTestCase):
         self.retirement_status.last_state = retirement_state
         self.retirement_status.save()
 
-        RevisionPluginRevision.objects.create()
-
-        # EDUCATOR-2701
-        # Blocked
-        # https://github.com/edx/django-wiki/pull/34/files
-        # Not sure I'm calling functions in the wiki correctly
-        ArticleRevision.retire_user(retirement.user)
-
-        # EDUCATOR-2695
-        # https://github.com/edx/edx-platform/pull/18100/files
-        PendingNameChange.delete_by_user_value(retirement.user, field='user')
-
-        # EDUCATOR-2690
-        # https://github.com/edx/edx-platform/commit/41b1f03c78d2c9ad7975f3b7eb28c2ca20884122
-        PasswordHistory.retire_user(retirement.user.id)
-
-        # EDUCATOR-2689
-        # https://github.com/edx/edx-platform/pull/18111/files
-        course_enrollments = CourseEnrollment.objects.filter(user=retirement.user)
+        """RevisionPluginRevision.objects.create()
+        ArticleRevision.objects.create()
+        PendingNameChange.objects.create()
+        PasswordHistory.objects.create()
+        course_enrollments = CourseEnrollment.objects.create()
         for enrollment in course_enrollments:
-            ManualEnrollmentAudit.retire_manual_enrollments(enrollment, retirement.retired_email)
-        CreditRequest.retire_user(retirement.original_username, retirement.retired_username)
-        ApiAccessRequest.retire_user(retirement.user)
-        CreditRequirementStatus.retire_user(retirement.user.username)
-        SurveyAnswer.retire_user(retirement.user.id)
+            ManualEnrollmentAudit.objects.create()
+        CreditRequest.objects.create()
+        ApiAccessRequest.objects.create()
+        CreditRequirementStatus.objects.create()
+        SurveyAnswer.objects.create()"""
 
         # setup for doing POST from test client
         self.headers = self.build_jwt_headers(self.test_superuser)
         self.headers['content_type'] = "application/json"
-        self.url = reverse('accounts_retire_lms')
+        self.url = reverse('accounts_retire_LMS')
 
     def post_and_assert_status(self, data, expected_status=status.HTTP_204_NO_CONTENT):
         """
@@ -2006,5 +1992,5 @@ class TestLMSAccountRetirementPost(RetirementTestCase):
 
         CreditRequest.retire_user(self.test_user.username, "retired username goes here")
         ApiAccessRequest.retire_user(self.test_user)
-        CreditRequirementStatus.retire_user(retirement.user.username)
-        SurveyAnswer.retire_user(retirement.user.id)
+        CreditRequirementStatus.retire_user(self.test_user.username)
+        SurveyAnswer.retire_user(self.test_user.id)
