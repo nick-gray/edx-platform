@@ -54,6 +54,7 @@ FEATURES = {}
 INSTALLED_APPS = (
     'django.contrib.auth',
     'django.contrib.contenttypes',
+    'django.contrib.humanize',
     'django.contrib.sessions',
     'django.contrib.sites',
     'djcelery',
@@ -65,6 +66,8 @@ INSTALLED_APPS = (
     'student',
     'openedx.core.djangoapps.site_configuration',
     'lms.djangoapps.certificates.apps.CertificatesConfig',
+    'mptt',
+    'wiki',
     'openedx.core.djangoapps.user_api',
     'course_modes.apps.CourseModesConfig',
     'lms.djangoapps.verify_student.apps.VerifyStudentConfig',
