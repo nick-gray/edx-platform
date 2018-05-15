@@ -10,8 +10,6 @@ from functools import wraps
 
 import pytz
 from consent.models import DataSharingConsent
-from wiki.models import ArticleRevision
-from wiki.models.pluginbase import RevisionPluginRevision
 from django.contrib.auth import authenticate, get_user_model, logout
 from django.core.cache import cache
 from django.db import transaction
@@ -28,6 +26,8 @@ from rest_framework.views import APIView
 from rest_framework.viewsets import ViewSet
 from six import text_type
 from social_django.models import UserSocialAuth
+from wiki.models import ArticleRevision
+from wiki.models.pluginbase import RevisionPluginRevision
 
 from entitlements.models import CourseEntitlement
 from lms.djangoapps.verify_student.models import SoftwareSecurePhotoVerification
