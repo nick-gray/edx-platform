@@ -551,9 +551,10 @@
         margin: 20px 0;
       }
 
-      .paragon__modal-open {
+      .paragon__modal {
         overflow-y: scroll;
         color: $dark-gray;
+        margin-top: 0.5rem;
 
         .paragon__modal-title {
           font-weight: $font-semibold;
@@ -610,7 +611,7 @@
 
       .delete-confirmation-wrapper {
         .paragon__modal-footer {
-          .paragon__btn-outline-primary {
+          .paragon__btn-secondary {
             @extend %ui-clear-button;
 
             // set styles
