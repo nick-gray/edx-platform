@@ -1918,3 +1918,297 @@ class TestAccountRetirementPost(RetirementTestCase):
         self.assertEqual(self.test_user, self.photo_verification.user)
         for field in ('name', 'face_image_url', 'photo_id_image_url', 'photo_id_key'):
             self.assertEqual('', getattr(self.photo_verification, field))
+
+
+@unittest.skipUnless(settings.ROOT_URLCONF == 'lms.urls', 'Account APIs are only supported in LMS')
+class TestLMSAccountRetirementPost(RetirementTestCase):
+    """
+    Tests the LMS account retirement (GDPR P2) endpoint.
+    """
+    def setUp(self):
+        super(TestLMSAccountRetirementPost, self).setUp()
+
+        self.test_user = UserFactory()
+        self.test_superuser = SuperuserFactory()
+        self.original_username = self.test_user.username
+        self.original_email = self.test_user.email
+        self.retired_username = get_retired_username_by_username(self.original_username)
+        self.retired_email = get_retired_email_by_email(self.original_email)
+
+        retirement_state = RetirementState.objects.get(state_name='RETIRING_LMS')
+        self.retirement_status = UserRetirementStatus.create_retirement(self.test_user)
+        self.retirement_status.current_state = retirement_state
+        self.retirement_status.last_state = retirement_state
+        self.retirement_status.save()
+
+        SocialLink.objects.create(
+            user_profile=self.test_user.profile,
+            platform='Facebook',
+            social_link='www.facebook.com'
+        ).save()
+
+        self.cache_key = UserProfile.country_cache_key_name(self.test_user.id)
+        cache.set(self.cache_key, 'Timor-leste')
+
+        # Enterprise model setup
+        self.course_id = 'course-v1:edX+DemoX.1+2T2017'
+        self.enterprise_customer = EnterpriseCustomer.objects.create(
+            name='test_enterprise_customer',
+            site=SiteFactory.create()
+        )
+        self.enterprise_user = EnterpriseCustomerUser.objects.create(
+            enterprise_customer=self.enterprise_customer,
+            user_id=self.test_user.id,
+        )
+        self.enterprise_enrollment = EnterpriseCourseEnrollment.objects.create(
+            enterprise_customer_user=self.enterprise_user,
+            course_id=self.course_id
+        )
+        self.pending_enterprise_user = PendingEnterpriseCustomerUser.objects.create(
+            enterprise_customer_id=self.enterprise_user.enterprise_customer_id,
+            user_email=self.test_user.email
+        )
+        self.sapsf_audit = SapSuccessFactorsLearnerDataTransmissionAudit.objects.create(
+            sapsf_user_id=self.test_user.id,
+            enterprise_course_enrollment_id=self.enterprise_enrollment.id,
+            completed_timestamp=1,
+        )
+        self.consent = DataSharingConsent.objects.create(
+            username=self.test_user.username,
+            enterprise_customer=self.enterprise_customer,
+        )
+
+        # Entitlement model setup
+        self.entitlement = CourseEntitlementFactory.create(user=self.test_user)
+        self.entitlement_support_detail = CourseEntitlementSupportDetail.objects.create(
+            entitlement=self.entitlement,
+            support_user=UserFactory(),
+            comments='A comment containing potential PII.'
+        )
+
+        # Misc. setup
+        self.photo_verification = SoftwareSecurePhotoVerificationFactory.create(user=self.test_user)
+        PendingEmailChangeFactory.create(user=self.test_user)
+        UserOrgTagFactory.create(user=self.test_user, key='foo', value='bar')
+        UserOrgTagFactory.create(user=self.test_user, key='cat', value='dog')
+
+        CourseEnrollmentAllowedFactory.create(email=self.original_email)
+
+        self.course_key = CourseKey.from_string('course-v1:edX+DemoX+Demo_Course')
+        self.cohort = CourseUserGroup.objects.create(
+            name="TestCohort",
+            course_id=self.course_key,
+            group_type=CourseUserGroup.COHORT
+        )
+        self.cohort_assignment = UnregisteredLearnerCohortAssignments.objects.create(
+            course_user_group=self.cohort,
+            course_id=self.course_key,
+            email=self.original_email
+        )
+
+        # setup for doing POST from test client
+        self.headers = self.build_jwt_headers(self.test_superuser)
+        self.headers['content_type'] = "application/json"
+        self.url = reverse('accounts_retire')
+
+    def post_and_assert_status(self, data, expected_status=status.HTTP_204_NO_CONTENT):
+        """
+        Helper function for making a request to the retire subscriptions endpoint, and asserting the status.
+        """
+        response = self.client.post(self.url, json.dumps(data), **self.headers)
+        self.assertEqual(response.status_code, expected_status)
+        return response
+
+    def test_user_profile_pii_has_expected_values(self):
+        expected_user_profile_pii = {
+            'name': '',
+            'meta': '',
+            'location': '',
+            'year_of_birth': None,
+            'gender': None,
+            'mailing_address': None,
+            'city': None,
+            'country': None,
+            'bio': None,
+        }
+        self.assertEqual(expected_user_profile_pii, USER_PROFILE_PII)
+
+    def test_retire_user_where_user_does_not_exist(self):
+        path = 'openedx.core.djangoapps.user_api.accounts.views.is_username_retired'
+        with mock.patch(path, return_value=False) as mock_retired_username:
+            data = {'username': 'not_a_user'}
+            response = self.post_and_assert_status(data, status.HTTP_404_NOT_FOUND)
+            self.assertFalse(response.content)
+            mock_retired_username.assert_called_once_with('not_a_user')
+
+    def test_retire_user_server_error_is_raised(self):
+        path = 'openedx.core.djangoapps.user_api.models.UserRetirementStatus.get_retirement_for_retirement_action'
+        with mock.patch(path, side_effect=Exception('Unexpected Exception')) as mock_get_retirement:
+            data = {'username': self.test_user.username}
+            response = self.post_and_assert_status(data, status.HTTP_500_INTERNAL_SERVER_ERROR)
+            self.assertEqual('Unexpected Exception', text_type(response.json()))
+            mock_get_retirement.assert_called_once_with(self.original_username)
+
+    def test_retire_user_where_user_already_retired(self):
+        path = 'openedx.core.djangoapps.user_api.accounts.views.is_username_retired'
+        with mock.patch(path, return_value=True) as mock_is_username_retired:
+            data = {'username': self.test_user.username}
+            response = self.post_and_assert_status(data, status.HTTP_404_NOT_FOUND)
+            self.assertFalse(response.content)
+            mock_is_username_retired.assert_called_once_with(self.original_username)
+
+    def test_retire_user_where_username_not_provided(self):
+        response = self.post_and_assert_status({}, status.HTTP_404_NOT_FOUND)
+        expected_response_message = {'message': text_type('The user was not specified.')}
+        self.assertEqual(expected_response_message, response.json())
+
+    @mock.patch('openedx.core.djangoapps.user_api.accounts.views.get_profile_image_names')
+    @mock.patch('openedx.core.djangoapps.user_api.accounts.views.remove_profile_images')
+    def test_retire_user(self, mock_remove_profile_images, mock_get_profile_image_names):
+        data = {'username': self.original_username}
+        self.post_and_assert_status(data)
+
+        self.test_user.refresh_from_db()
+        self.test_user.profile.refresh_from_db()  # pylint: disable=no-member
+
+        expected_user_values = {
+            'first_name': '',
+            'last_name': '',
+            'is_active': False,
+            'username': self.retired_username,
+        }
+        for field, expected_value in expected_user_values.iteritems():
+            self.assertEqual(expected_value, getattr(self.test_user, field))
+
+        for field, expected_value in USER_PROFILE_PII.iteritems():
+            self.assertEqual(expected_value, getattr(self.test_user.profile, field))
+
+        self.assertIsNone(self.test_user.profile.profile_image_uploaded_at)
+        mock_get_profile_image_names.assert_called_once_with(self.original_username)
+        mock_remove_profile_images.assert_called_once_with(
+            mock_get_profile_image_names.return_value
+        )
+
+        self.assertFalse(
+            SocialLink.objects.filter(user_profile=self.test_user.profile).exists()
+        )
+
+        self.assertIsNone(cache.get(self.cache_key))
+
+        self._data_sharing_consent_assertions()
+        self._sapsf_audit_assertions()
+        self._pending_enterprise_customer_user_assertions()
+        self._entitlement_support_detail_assertions()
+
+        self._photo_verification_assertions()
+        self.assertFalse(PendingEmailChange.objects.filter(user=self.test_user).exists())
+        self.assertFalse(UserOrgTag.objects.filter(user=self.test_user).exists())
+
+        self.assertFalse(CourseEnrollmentAllowed.objects.filter(email=self.original_email).exists())
+        self.assertFalse(UnregisteredLearnerCohortAssignments.objects.filter(email=self.original_email).exists())
+
+    def test_deletes_pii_from_user_profile(self):
+        for model_field, value_to_assign in USER_PROFILE_PII.iteritems():
+            if value_to_assign == '':
+                value = 'foo'
+            else:
+                value = mock.Mock()
+            setattr(self.test_user.profile, model_field, value)
+
+        AccountRetirementView.clear_pii_from_userprofile(self.test_user)
+
+        for model_field, value_to_assign in USER_PROFILE_PII.iteritems():
+            self.assertEqual(value_to_assign, getattr(self.test_user.profile, model_field))
+
+        social_links = SocialLink.objects.filter(
+            user_profile=self.test_user.profile
+        )
+        self.assertFalse(social_links.exists())
+
+    @mock.patch('openedx.core.djangoapps.user_api.accounts.views.get_profile_image_names')
+    @mock.patch('openedx.core.djangoapps.user_api.accounts.views.remove_profile_images')
+    def test_removes_user_profile_images(
+        self, mock_remove_profile_images, mock_get_profile_image_names
+    ):
+        test_datetime = datetime.datetime(2018, 1, 1)
+        self.test_user.profile.profile_image_uploaded_at = test_datetime
+
+        AccountRetirementView.delete_users_profile_images(self.test_user)
+
+        self.test_user.profile.refresh_from_db()  # pylint: disable=no-member
+
+        self.assertIsNone(self.test_user.profile.profile_image_uploaded_at)
+        mock_get_profile_image_names.assert_called_once_with(self.test_user.username)
+        mock_remove_profile_images.assert_called_once_with(
+            mock_get_profile_image_names.return_value
+        )
+
+    def test_can_delete_user_profiles_country_cache(self):
+        AccountRetirementView.delete_users_country_cache(self.test_user)
+        self.assertIsNone(cache.get(self.cache_key))
+
+    def test_can_retire_users_datasharingconsent(self):
+        AccountRetirementView.retire_users_data_sharing_consent(self.test_user.username, self.retired_username)
+        self._data_sharing_consent_assertions()
+
+    def _data_sharing_consent_assertions(self):
+        """
+        Helper method for asserting that ``DataSharingConsent`` objects are retired.
+        """
+        self.consent.refresh_from_db()
+        self.assertEqual(self.retired_username, self.consent.username)
+        test_users_data_sharing_consent = DataSharingConsent.objects.filter(
+            username=self.original_username
+        )
+        self.assertFalse(test_users_data_sharing_consent.exists())
+
+    def test_can_retire_users_sap_success_factors_audits(self):
+        AccountRetirementView.retire_sapsf_data_transmission(self.test_user)
+        self._sapsf_audit_assertions()
+
+    def _sapsf_audit_assertions(self):
+        """
+        Helper method for asserting that ``SapSuccessFactorsLearnerDataTransmissionAudit`` objects are retired.
+        """
+        self.sapsf_audit.refresh_from_db()
+        self.assertEqual('', self.sapsf_audit.sapsf_user_id)
+        audits_for_original_user_id = SapSuccessFactorsLearnerDataTransmissionAudit.objects.filter(
+            sapsf_user_id=self.test_user.id,
+        )
+        self.assertFalse(audits_for_original_user_id.exists())
+
+    def test_can_retire_user_from_pendingenterprisecustomeruser(self):
+        AccountRetirementView.retire_user_from_pending_enterprise_customer_user(self.test_user, self.retired_email)
+        self._pending_enterprise_customer_user_assertions()
+
+    def _pending_enterprise_customer_user_assertions(self):
+        """
+        Helper method for asserting that ``PendingEnterpriseCustomerUser`` objects are retired.
+        """
+        self.pending_enterprise_user.refresh_from_db()
+        self.assertEqual(self.retired_email, self.pending_enterprise_user.user_email)
+        pending_enterprise_users = PendingEnterpriseCustomerUser.objects.filter(
+            user_email=self.original_email
+        )
+        self.assertFalse(pending_enterprise_users.exists())
+
+    def test_course_entitlement_support_detail_comments_are_retired(self):
+        AccountRetirementView.retire_entitlement_support_detail(self.test_user)
+        self._entitlement_support_detail_assertions()
+
+    def _entitlement_support_detail_assertions(self):
+        """
+        Helper method for asserting that ``CourseEntitleSupportDetail`` objects are retired.
+        """
+        self.entitlement_support_detail.refresh_from_db()
+        self.assertEqual('', self.entitlement_support_detail.comments)
+
+    def _photo_verification_assertions(self):
+        """
+        Helper method for asserting that ``SoftwareSecurePhotoVerification`` objects are retired.
+        """
+        self.photo_verification.refresh_from_db()
+        self.assertEqual(self.test_user, self.photo_verification.user)
+        for field in ('name', 'face_image_url', 'photo_id_image_url', 'photo_id_key'):
+            self.assertEqual('', getattr(self.photo_verification, field))
+

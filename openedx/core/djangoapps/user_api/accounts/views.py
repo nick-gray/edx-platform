@@ -641,7 +641,7 @@ class LMSAccountRetirementView(ViewSet):
             # https://github.com/edx/edx-platform/pull/18111/files
             course_enrollments = CourseEnrollment.objects.filter(user=retirement.user)
             for enrollment in course_enrollments:
-                ManualEnrollmentAudit.retire_manual_enrollments(enrollment)
+                ManualEnrollmentAudit.retire_manual_enrollments(enrollment, retirement.retired_email)
 
             # EDUCATOR-2659 // EDUCATOR-2813
             # this is currently handled below, the same way as sapsf
