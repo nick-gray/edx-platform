@@ -19,7 +19,7 @@ from django_comment_client.constants import TYPE_ENTRY, TYPE_SUBCATEGORY
 from django_comment_client.permissions import check_permissions_by_view, get_team, has_permission
 from django_comment_client.settings import MAX_COMMENT_DEPTH
 from django_comment_common.models import FORUM_ROLE_STUDENT, CourseDiscussionSettings, Role
-from django_comment_common.utils import get_course_discussion_settings
+from django_comment_common.utils import get_accessible_discussion_xblocks_by_course_id, get_course_discussion_settings
 from openedx.core.djangoapps.content.course_structures.models import CourseStructure
 from openedx.core.djangoapps.course_groups.cohorts import get_cohort_id, get_cohort_names, is_course_cohorted
 from openedx.core.djangoapps.request_cache.middleware import request_cached
@@ -122,20 +122,6 @@ def get_accessible_discussion_xblocks(course, user, include_all=False):  # pylin
     are accessible to the given user.
     """
     return get_accessible_discussion_xblocks_by_course_id(course.id, user, include_all=include_all)
-
-
-@request_cached
-def get_accessible_discussion_xblocks_by_course_id(course_id, user=None, include_all=False):  # pylint: disable=invalid-name
-    """
-    Return a list of all valid discussion xblocks in this course.
-    Checks for the given user's access if include_all is False.
-    """
-    all_xblocks = modulestore().get_items(course_id, qualifiers={'category': 'discussion'}, include_orphans=False)
-
-    return [
-        xblock for xblock in all_xblocks
-        if has_required_keys(xblock) and (include_all or has_access(user, 'load', xblock, course_id))
-    ]
 
 
 def get_discussion_id_map_entry(xblock):

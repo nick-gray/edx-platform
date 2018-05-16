@@ -1,7 +1,6 @@
 """
 Common comment client utility functions.
 """
-
 from django_comment_common.models import (
     FORUM_ROLE_ADMINISTRATOR,
     FORUM_ROLE_COMMUNITY_TA,
@@ -12,6 +11,7 @@ from django_comment_common.models import (
 )
 from openedx.core.djangoapps.course_groups.cohorts import get_legacy_discussion_settings
 from openedx.core.djangoapps.request_cache.middleware import request_cached
+from xmodule.modulestore.django import modulestore
 
 from .models import CourseDiscussionSettings
 
@@ -160,3 +160,19 @@ def set_course_discussion_settings(course_key, **kwargs):
 
     course_discussion_settings.save()
     return course_discussion_settings
+
+
+@request_cached
+def get_accessible_discussion_xblocks_by_course_id(course_id, user=None, include_all=False):  # pylint: disable=invalid-name
+    """
+    Return a list of all valid discussion xblocks in this course.
+    Checks for the given user's access if include_all is False.
+    """
+    all_xblocks = modulestore().get_items(course_id, qualifiers={'category': 'discussion'}, include_orphans=False)
+
+    return [
+        xblock for xblock in all_xblocks
+        if has_required_keys(xblock) and (include_all or has_access(user, 'load', xblock, course_id))
+    ]
+
+
