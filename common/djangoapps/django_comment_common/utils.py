@@ -176,3 +176,17 @@ def get_accessible_discussion_xblocks_by_course_id(course_id, user=None, include
     ]
 
 
+def has_required_keys(xblock):
+    """
+    Returns True iff xblock has the proper attributes for generating metadata
+    with get_discussion_id_map_entry()
+    """
+    for key in ('discussion_id', 'discussion_category', 'discussion_target'):
+        if getattr(xblock, key, None) is None:
+            log.debug(
+                "Required key '%s' not in discussion %s, leaving out of category map",
+                key,
+                xblock.location
+            )
+            return False
+    return True

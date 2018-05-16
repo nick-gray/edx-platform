@@ -19,7 +19,9 @@ from django_comment_client.constants import TYPE_ENTRY, TYPE_SUBCATEGORY
 from django_comment_client.permissions import check_permissions_by_view, get_team, has_permission
 from django_comment_client.settings import MAX_COMMENT_DEPTH
 from django_comment_common.models import FORUM_ROLE_STUDENT, CourseDiscussionSettings, Role
-from django_comment_common.utils import get_accessible_discussion_xblocks_by_course_id, get_course_discussion_settings
+from django_comment_common.utils import (
+    get_accessible_discussion_xblocks_by_course_id, get_course_discussion_settings, has_required_keys
+)
 from openedx.core.djangoapps.content.course_structures.models import CourseStructure
 from openedx.core.djangoapps.course_groups.cohorts import get_cohort_id, get_cohort_names, is_course_cohorted
 from openedx.core.djangoapps.request_cache.middleware import request_cached
@@ -98,22 +100,6 @@ def has_forum_access(uname, course_id, rolename):
     except Role.DoesNotExist:
         return False
     return role.users.filter(username=uname).exists()
-
-
-def has_required_keys(xblock):
-    """
-    Returns True iff xblock has the proper attributes for generating metadata
-    with get_discussion_id_map_entry()
-    """
-    for key in ('discussion_id', 'discussion_category', 'discussion_target'):
-        if getattr(xblock, key, None) is None:
-            log.debug(
-                "Required key '%s' not in discussion %s, leaving out of category map",
-                key,
-                xblock.location
-            )
-            return False
-    return True
 
 
 def get_accessible_discussion_xblocks(course, user, include_all=False):  # pylint: disable=invalid-name

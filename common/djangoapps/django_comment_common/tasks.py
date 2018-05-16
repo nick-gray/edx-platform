@@ -1,6 +1,8 @@
 from celery_utils.logged_task import LoggedTask
 from opaque_keys.edx.keys import CourseKey
-from django_comment_common.utils import set_course_discussion_settings
+from django_comment_common.utils import (
+    get_accessible_discussion_xblocks_by_course_id, set_course_discussion_settings
+)
 
 
 @task(base=LoggedTask)
