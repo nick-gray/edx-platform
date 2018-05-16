@@ -39,7 +39,6 @@ class Router(AlternateEnvironmentRouter):
             'completion_aggregator.tasks.update_aggregators': 'lms',
             'openedx.core.djangoapps.content.block_structure.tasks.update_course_in_cache': 'lms',
             'openedx.core.djangoapps.content.block_structure.tasks.update_course_in_cache_v2': 'lms',
-            'discussion.tasks.update_discussion_map': 'lms',
         }
 
     @property
