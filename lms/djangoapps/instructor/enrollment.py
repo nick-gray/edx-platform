@@ -44,6 +44,9 @@ log = logging.getLogger(__name__)
 class EmailEnrollmentState(object):
     """ Store the complete enrollment state of an email in a class """
     def __init__(self, course_id, email):
+        # N.B. retired users are not a concern here because they should be
+        # handled at a higher level (i.e. in enroll_email).  Besides, this
+        # class creates readonly objects.
         exists_user = User.objects.filter(email=email).exists()
         if exists_user:
             user = User.objects.get(email=email)
@@ -142,7 +145,7 @@ def enroll_email(course_id, student_email, auto_enroll=False, email_students=Fal
             email_params['email_address'] = student_email
             email_params['full_name'] = previous_state.full_name
             send_mail_to_student(student_email, email_params, language=language)
-    else:
+    elif not is_email_retired(student_email):
         cea, _ = CourseEnrollmentAllowed.objects.get_or_create(course_id=course_id, email=student_email)
         cea.auto_enroll = auto_enroll
         cea.save()
